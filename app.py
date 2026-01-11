@@ -8,11 +8,36 @@ import faiss
 @st.cache_resource
 def cargar_modelo():
     textos = []
-    for archivo in os.listdir("data"):
-        if archivo.endswith(".pdf"):
-            reader = PdfReader(os.path.join("data", archivo))
-            for pagina in reader.pages:
-                textos.append(pagina.extract_text())
+
+    for pdf in os.listdir("data"):
+        if not pdf.lower().endswith(".pdf"):
+            continue
+
+        ruta = os.path.join("data", pdf)
+
+        try:
+            reader = PdfReader(ruta)
+        except Exception as e:
+            st.warning(f"No se pudo abrir {pdf}")
+            continue
+
+        for pagina in reader.pages:
+            try:
+                texto = pagina.extract_text()
+                if texto and len(texto.strip()) > 50:
+                    textos.append(texto)
+            except Exception:
+                # ignora páginas con fuentes rotas
+                continue
+
+    modelo = SentenceTransformer("all-MiniLM-L6-v2")
+
+    embeddings = modelo.encode(textos, show_progress_bar=True)
+
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(np.array(embeddings).astype("float32"))
+
+    return modelo, index, textos
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
