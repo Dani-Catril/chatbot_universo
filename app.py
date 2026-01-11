@@ -1,4 +1,9 @@
-
+import streamlit as st
+import os
+import numpy as np
+from pypdf import PdfReader
+from sentence_transformers import SentenceTransformer
+import faiss
 
 @st.cache_resource
 def cargar_modelo():
@@ -37,4 +42,4 @@ pregunta = st.text_input("Haz una pregunta sobre el universo")
 if pregunta:
     st.write("### Respuesta")
     st.write(preguntar(pregunta))
->>>>>>> 0bf16fd9b5e58c9cf074c36b178e492615c23e32
+
