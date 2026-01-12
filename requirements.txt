@@ -1,9 +1,8 @@
 
 streamlit
-pypdf
 faiss-cpu
-sentence-transformers
-langchain-text-splitters
-langchain-community
-ollama
 numpy
+pypdf
+sentence-transformers
+langchain
+openai

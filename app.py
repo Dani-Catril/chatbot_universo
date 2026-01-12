@@ -1,94 +1,70 @@
-import streamlit as st
 import os
+import re
 import numpy as np
 import faiss
-
+import streamlit as st
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.llms import Ollama
+from openai import OpenAI
 
+# -----------------------------
+# Configuración OpenAI
+# -----------------------------
+openai_api_key = st.secrets["OPENAI_API_KEY"]  # Guarda tu key en Streamlit Secrets
+client = OpenAI(api_key=openai_api_key)
 
-# --------------------------------------------------
-# CONFIG STREAMLIT
-# --------------------------------------------------
-st.set_page_config(
-    page_title="Chatbot del Universo",
-    page_icon="🌌",
-    layout="centered"
-)
-
-
-# --------------------------------------------------
-# CARGA DEL SISTEMA (CACHEADA)
-# --------------------------------------------------
+# -----------------------------
+# Funciones de carga y preprocesamiento
+# -----------------------------
 @st.cache_resource
-def cargar_sistema():
+def cargar_pdfs(ruta="data"):
     textos = []
-
-    for archivo in os.listdir("data"):
+    for archivo in os.listdir(ruta):
         if archivo.lower().endswith(".pdf"):
-            ruta = os.path.join("data", archivo)
-            try:
-                reader = PdfReader(ruta)
-                for pagina in reader.pages:
-                    try:
-                        texto = pagina.extract_text()
-                        if texto and len(texto) > 50:
-                            textos.append(texto)
-                    except:
-                        continue
-            except:
-                continue
+            reader = PdfReader(os.path.join(ruta, archivo))
+            for pagina in reader.pages:
+                texto = pagina.extract_text()
+                if texto and len(texto) > 50:
+                    textos.append(texto)
+    return textos
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=80
-    )
-
-    chunks = splitter.split_text("\n".join(textos))
-
+@st.cache_resource
+def crear_embeddings(chunks):
     embedder = SentenceTransformer("all-MiniLM-L6-v2")
-    embeddings = embedder.encode(chunks, show_progress_bar=False)
-
+    embeddings = embedder.encode(chunks, show_progress_bar=True)
     index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(np.array(embeddings))
+    return embedder, index
 
-    llm = Ollama(
-        model="llama3",
-        temperature=0.2
-    )
+def split_text(texto, chunk_size=500, overlap=80):
+    textos = []
+    start = 0
+    while start < len(texto):
+        end = start + chunk_size
+        textos.append(texto[start:end])
+        start += chunk_size - overlap
+    return textos
 
-    return llm, embedder, index, chunks
-
-
-# --------------------------------------------------
-# BÚSQUEDA DE CONTEXTO
-# --------------------------------------------------
+# -----------------------------
+# Funciones de búsqueda y QA
+# -----------------------------
 def buscar_contexto(pregunta, embedder, index, chunks, k=3):
     pregunta_vec = embedder.encode([pregunta])
-    _, indices = index.search(pregunta_vec, k)
-
+    distancias, indices = index.search(pregunta_vec, k)
     contexto = []
     for i in indices[0]:
         if i < len(chunks):
-            texto = chunks[i].strip()
-            if len(texto) > 80:
-                contexto.append(texto[:300])
-
+            txt = chunks[i].strip()
+            if len(txt) > 50:
+                contexto.append(txt[:400])
     return "\n\n".join(contexto)
 
-
-# --------------------------------------------------
-# PREGUNTAR AL MODELO
-# --------------------------------------------------
-def preguntar(pregunta, llm, embedder, index, chunks):
+def preguntar(pregunta, embedder, index, chunks):
     contexto = buscar_contexto(pregunta, embedder, index, chunks)
-
     prompt = f"""
 Eres un profesor de astronomía.
-Responde SOLO usando la información del contexto.
-Máximo 4 líneas.
+Responde SOLO con la información del contexto.
+Máximo 5 líneas.
 Si no hay información suficiente, dilo explícitamente.
 
 Contexto:
@@ -99,24 +75,50 @@ Pregunta:
 
 Respuesta clara y directa:
 """
-    return llm.invoke(prompt).strip()
+    respuesta = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=300
+    )
+    return respuesta.choices[0].message.content.strip()
 
+# -----------------------------
+# Función para generar imágenes
+# -----------------------------
+def imagen_por_pregunta(pregunta):
+    # Ejemplo: genera URL de DALL·E (requiere habilitar imagen en OpenAI)
+    imagen = client.images.generate(
+        model="gpt-image-1",
+        prompt=pregunta,
+        size="512x512"
+    )
+    return imagen.data[0].url
 
-# --------------------------------------------------
-# INTERFAZ STREAMLIT
-# --------------------------------------------------
-st.title("🌌 Chatbot del Universo")
-st.write("Preguntas basadas exclusivamente en documentos de astronomía.")
+# -----------------------------
+# Streamlit App
+# -----------------------------
+st.title("🌌 Chatbot Universo")
 
-with st.spinner("Cargando sistema..."):
-    llm, embedder, index, chunks = cargar_sistema()
+# Carga PDFs y crea embeddings (solo la primera vez)
+with st.spinner("Cargando PDFs y generando embeddings..."):
+    textos = cargar_pdfs()
+    all_text = "\n".join(textos)
+    chunks = split_text(all_text)
+    embedder, index = crear_embeddings(chunks)
 
-pregunta = st.text_input("Haz una pregunta sobre el universo:")
+# Input del usuario
+pregunta = st.text_input("Escribe tu pregunta sobre astronomía:")
 
 if pregunta:
     with st.spinner("Pensando..."):
-        respuesta = preguntar(pregunta, llm, embedder, index, chunks)
+        respuesta = preguntar(pregunta, embedder, index, chunks)
+    
+    # Imagen relacionada
+    try:
+        st.image(imagen_por_pregunta(pregunta), use_container_width=True)
+    except Exception:
+        st.write("No se pudo generar la imagen.")
 
-    st.markdown("### 📘 Respuesta")
+    st.markdown("### Respuesta")
     st.write(respuesta)
-
