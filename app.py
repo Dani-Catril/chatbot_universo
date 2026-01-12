@@ -16,16 +16,24 @@ client = OpenAI(api_key=openai_api_key)
 # -----------------------------
 # Funciones de carga y preprocesamiento
 # -----------------------------
-@st.cache_resource
-def cargar_pdfs(ruta="data"):
+@st.cache_data
+def cargar_pdfs():
     textos = []
-    for archivo in os.listdir(ruta):
-        if archivo.lower().endswith(".pdf"):
-            reader = PdfReader(os.path.join(ruta, archivo))
-            for pagina in reader.pages:
-                texto = pagina.extract_text()
-                if texto and len(texto) > 50:
-                    textos.append(texto)
+
+    carpeta = "pdfs"  # carpeta donde están tus PDFs
+    for archivo in os.listdir(carpeta):
+        if archivo.endswith(".pdf"):
+            ruta = os.path.join(carpeta, archivo)
+            reader = PdfReader(ruta)
+
+            for i, pagina in enumerate(reader.pages):
+                try:
+                    texto = pagina.extract_text()
+                    if texto:
+                        textos.append(texto)
+                except Exception as e:
+                    st.warning(f"⚠️ Error leyendo {archivo} página {i}")
+
     return textos
 
 @st.cache_resource
